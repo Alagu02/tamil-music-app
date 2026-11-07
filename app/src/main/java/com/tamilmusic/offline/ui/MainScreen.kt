@@ -1,15 +1,11 @@
 package com.tamilmusic.offline.ui
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.Crossfade
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
@@ -21,95 +17,66 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.tamilmusic.offline.MainViewModel
-import com.tamilmusic.offline.data.Song
+import com.tamilmusic.offline.ui.theme.AccentBrush
 import com.tamilmusic.offline.ui.theme.Pink
 
+private const val FAV_ID = -1L
+
 @Composable
-fun MainScreen(vm: MainViewModel, actions: Actions) {
-    var tab by rememberSaveable { mutableIntStateOf(0) }
-    var libMode by rememberSaveable { mutableIntStateOf(0) }
-    var showPlayer by rememberSaveable { mutableStateOf(false) }
-    val current by vm.current.collectAsState()
-    BackHandler(showPlayer) { showPlayer = false }
+fun PlaylistsScreen(vm: MainViewModel) {
+    val playlists by vm.playlists.collectAsState()
+    val favs by vm.favoriteIds.collectAsState()
+    var open by rememberSaveable { mutableStateOf<Long?>(null) }
+    var create by remember { mutableStateOf(false) }
+    BackHandler(open != null) { open = null }
 
-    Box(Modifier.fillMaxSize()) {
-        Scaffold(
-            bottomBar = {
-                Column {
-                    current?.let { MiniPlayer(vm, it) { showPlayer = true } }
-                    NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
-                        val items = listOf(
-                            Triple("Home", Icons.Rounded.Home, 0),
-                            Triple("Library", Icons.Rounded.LibraryMusic, 1),
-                            Triple("Playlists", Icons.Rounded.Favorite, 2),
-                            Triple("Settings", Icons.Rounded.Settings, 3)
-                        )
-                        items.forEach { (label, icon, idx) ->
-                            NavigationBarItem(
-                                selected = tab == idx, onClick = { tab = idx },
-                                icon = { Icon(icon, label) }, label = { Text(label) },
-                                colors = NavigationBarItemDefaults.colors(
-                                    selectedIconColor = Color.White,
-                                    indicatorColor = MaterialTheme.colorScheme.primary,
-                                    selectedTextColor = MaterialTheme.colorScheme.primary
-                                )
-                            )
-                        }
-                    }
-                }
-            }
-        ) { pad ->
-            Box(Modifier.padding(pad)) {
-                Crossfade(targetState = tab, label = "tabs") { t ->
-                    when (t) {
-                        0 -> HomeScreen(vm, actions, onOpenLibrary = { libMode = it; tab = 1 }, onOpenPlaylists = { tab = 2 })
-                        1 -> LibraryScreen(vm, libMode, actions)
-                        2 -> PlaylistsScreen(vm)
-                        else -> SettingsScreen(vm, actions)
-                    }
-                }
-            }
+    val openId = open
+    if (openId != null) {
+        val name = if (openId == FAV_ID) "Favourites" else playlists.firstOrNull { it.id == openId }?.name
+        if (name == null) { open = null } else PlaylistDetail(vm, openId, name) { open = null }
+        return
+    }
+
+    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "Playlists", style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)
+            )
+            IconButton(onClick = { create = true }) { Icon(Icons.Rounded.Add, "New playlist") }
         }
-
-        AnimatedVisibility(
-            visible = showPlayer,
-            enter = slideInVertically { it } + fadeIn(),
-            exit = slideOutVertically { it } + fadeOut()
-        ) {
-            PlayerScreen(vm) { showPlayer = false }
+        Spacer(Modifier.height(8.dp))
+        LazyColumn {
+            item {
+                PlaylistRow("Favourites", "${favs.size} songs", true, onClick = { open = FAV_ID }, onDelete = null)
+            }
+            itemsIndexed(playlists, key = { _, p -> p.id }) { _, p ->
+                PlaylistRow(p.name, "Playlist", false, onClick = { open = p.id }, onDelete = { vm.deletePlaylist(p.id) })
+            }
+            if (playlists.isEmpty()) item {
+                Text(
+                    "Tap + to create your first playlist.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp)
+                )
+            }
         }
     }
+    if (create) CreatePlaylistDialog(onCreate = { vm.createPlaylist(it) }, onDismiss = { create = false })
 }
 
 @Composable
-private fun MiniPlayer(vm: MainViewModel, song: Song, onOpen: () -> Unit) {
-    val st by vm.pm.state.collectAsState()
-    val pos by rememberPosition(vm.pm)
-    val cs = MaterialTheme.colorScheme
-    Column(
-        Modifier.padding(horizontal = 10.dp, vertical = 6.dp).clip(RoundedCornerShape(22.dp))
-            .background(cs.surfaceVariant).clickable(onClick = onOpen)
+private fun PlaylistRow(title: String, subtitle: String, fav: Boolean, onClick: () -> Unit, onDelete: (() -> Unit)?) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(18.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant).clickable(onClick = onClick).padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            SongArt(song.artUri, Modifier.size(44.dp), corner = 12.dp)
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
-                Text(song.title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
-                Text(song.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
-            }
-            IconButton(onClick = { vm.pm.previous() }) { Icon(Icons.Rounded.SkipPrevious, "Previous") }
-            IconButton(onClick = { vm.pm.togglePlay() }) {
-                Icon(if (st.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, "Play/Pause", tint = Pink, modifier = Modifier.size(32.dp))
-            }
-            IconButton(onClick = { vm.pm.next() }) { Icon(Icons.Rounded.SkipNext, "Next") }
+        Box(Modifier.size(48.dp).clip(RoundedCornerShape(14.dp)).background(AccentBrush), contentAlignment = Alignment.Center) {
+            Icon(if (fav) Icons.Rounded.Favorite else Icons.Rounded.LibraryMusic, null, tint = Color.White)
         }
-        val p = if (st.durationMs > 0) (pos.toFloat() / st.durationMs).coerceIn(0f, 1f) else 0f
-        LinearProgressIndicator(
-            progress = { p }, modifier = Modifier.fillMaxWidth().height(3.dp),
-            color = Pink, trackColor = Color.Transparent
-        )
-    }
-}
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            Text(subtitle,
